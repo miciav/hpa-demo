@@ -52,7 +52,7 @@ CONFIG: dict[str, Any] = {
     "interval": float(os.getenv("HPA_DASHBOARD_INTERVAL", "1.0")),
     "max_pods": int(os.getenv("HPA_DASHBOARD_MAX_PODS", "6")),
     "max_log_lines": int(os.getenv("HPA_DASHBOARD_MAX_LOG_LINES", "6")),
-    "ascii_boxes": os.getenv("HPA_DASHBOARD_ASCII", "1") not in ("0", "false", "False", "no"),
+    "ascii_boxes": os.getenv("HPA_DASHBOARD_ASCII", "0") not in ("0", "false", "False", "no"),
 }
 
 
@@ -407,7 +407,7 @@ def stop_load():
 
 def _panel_box():
     from rich import box
-    return box.ASCII if CONFIG.get("ascii_boxes", True) else box.ROUNDED
+    return box.ASCII if CONFIG.get("ascii_boxes", False) else box.SQUARE
 
 
 def _bounded(value, default, minimum=1):
@@ -455,7 +455,7 @@ def _build_header(state):
     return Panel(header, border_style="blue", padding=(0, 1), box=_panel_box(), height=3)
 
 
-def _build_cpu_panel(state):
+def _build_cpu_panel(state, height=12):
     from rich.console import Group
     from rich.panel import Panel
     from rich.text import Text
@@ -499,11 +499,11 @@ def _build_cpu_panel(state):
         border_style="cyan",
         padding=(0, 1),
         box=_panel_box(),
-        height=12,
+        height=height,
     )
 
 
-def _build_pod_panel(state):
+def _build_pod_panel(state, height=None):
     from rich.panel import Panel
     from rich.table import Table
 
@@ -557,14 +557,13 @@ def _build_pod_panel(state):
             "[dim]—[/]",
         )
 
-    panel_height = max_pods + 5
     return Panel(
         table,
         title=f"Pods ({len(pods)})",
         border_style="blue",
         padding=(0, 1),
         box=_panel_box(),
-        height=panel_height,
+        height=height if height is not None else max_pods + 5,
     )
 
 
@@ -610,10 +609,16 @@ def render(state):
     from rich.console import Group
     from rich.table import Table
 
+    max_pods = _bounded(CONFIG.get("max_pods"), default=6)
+    row_height = max(12, max_pods + 5)
+
     main = Table.grid(expand=True)
     main.add_column(ratio=2)
     main.add_column(ratio=1)
-    main.add_row(_build_cpu_panel(state), _build_pod_panel(state))
+    main.add_row(
+        _build_cpu_panel(state, height=row_height),
+        _build_pod_panel(state, height=row_height),
+    )
     return Group(
         _build_header(state),
         main,
@@ -703,7 +708,10 @@ def _build_arg_parser():
     parser.add_argument("--screen", action="store_true", help="Use Rich alternate screen mode")
     parser.add_argument("--max-pods", type=int, default=CONFIG["max_pods"])
     parser.add_argument("--max-log-lines", type=int, default=CONFIG["max_log_lines"])
-    parser.add_argument("--unicode-boxes", action="store_true", help="Use Unicode borders")
+    parser.add_argument(
+        "--ascii-boxes", action="store_true",
+        help="Use plain ASCII borders (fallback for terminals without Unicode support)",
+    )
     parser.add_argument("--once", action="store_true", help="Collect once, render, and exit")
     return parser
 
@@ -722,7 +730,7 @@ def main(argv=None):
         "interval": max(0.25, args.interval),
         "max_pods": max(1, args.max_pods),
         "max_log_lines": max(1, args.max_log_lines),
-        "ascii_boxes": not args.unicode_boxes,
+        "ascii_boxes": args.ascii_boxes,
     })
 
     state: dict[str, Any] = {
